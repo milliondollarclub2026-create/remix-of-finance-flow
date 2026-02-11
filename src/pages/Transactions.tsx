@@ -10,15 +10,51 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { CalendarIcon, Filter, Download, TrendingUp, TrendingDown, ArrowRightLeft, Trash2, X, Wallet, Building2 } from 'lucide-react';
 import { format, parseISO, isAfter, isBefore, isToday, isYesterday } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
 import { FilterBar } from '@/components/dashboard/FilterBar';
+import { exportToCsv } from '@/lib/exportCsv';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+
+const transactionSchema = z.object({
+  amount: z.string().min(1, 'Amount is required').refine(v => !isNaN(Number(v)) && Number(v) > 0, 'Amount must be a positive number'),
+  account_id: z.string().min(1, 'Account is required'),
+  to_account_id: z.string().optional(),
+  category_id: z.string().optional(),
+  date: z.date({ required_error: 'Date is required' }),
+  project_id: z.string().optional(),
+  counterparty_id: z.string().optional(),
+  description: z.string().optional(),
+});
+
+type TransactionFormValues = z.infer<typeof transactionSchema>;
 
 type ModalType = 'INCOME' | 'EXPENSE' | 'TRANSFER' | null;
 type ViewFilter = 'all' | 'actual' | 'planned';
 type TypeFilter = 'all' | 'INCOME' | 'EXPENSE' | 'TRANSFER';
+
+interface UnifiedRow {
+  id: string;
+  date: string;
+  type: string;
+  amount: number;
+  categoryId?: string;
+  projectId?: string;
+  counterpartyId?: string;
+  accountId: string;
+  toAccountId?: string;
+  description: string;
+  status: string;
+  isPlanned: boolean;
+}
 
 const Transactions: React.FC = () => {
   const {
@@ -28,36 +64,62 @@ const Transactions: React.FC = () => {
 
   const [searchParams, setSearchParams] = useSearchParams();
   const [modalType, setModalType] = useState<ModalType>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [viewFilter, setViewFilter] = useState<ViewFilter>('all');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [filterOpen, setFilterOpen] = useState(false);
   const [advFilters, setAdvFilters] = useState({ accountId: 'all', projectId: 'all', counterpartyId: 'all', categoryId: 'all' });
+  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
 
   // Form state
-  const [formAmount, setFormAmount] = useState('');
-  const [formAccountId, setFormAccountId] = useState('');
-  const [formToAccountId, setFormToAccountId] = useState('');
-  const [formCategoryId, setFormCategoryId] = useState('');
-  const [formDate, setFormDate] = useState<Date>(new Date());
-  const [formProjectId, setFormProjectId] = useState('');
-  const [formCounterpartyId, setFormCounterpartyId] = useState('');
-  const [formDescription, setFormDescription] = useState('');
   const [formDateOpen, setFormDateOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const defaultAccountId = companySettings?.default_account_id || (accounts.length > 0 ? accounts[0].id : '');
 
+  const form = useForm<TransactionFormValues>({
+    resolver: zodResolver(transactionSchema),
+    defaultValues: {
+      amount: '',
+      account_id: defaultAccountId,
+      to_account_id: '',
+      category_id: '',
+      date: new Date(),
+      project_id: '',
+      counterparty_id: '',
+      description: '',
+    },
+  });
+
   const openModal = (type: ModalType) => {
-    setFormAmount('');
-    setFormAccountId(defaultAccountId);
-    setFormToAccountId('');
-    setFormCategoryId('');
-    setFormDate(new Date());
-    setFormProjectId('');
-    setFormCounterpartyId('');
-    setFormDescription('');
+    setEditingId(null);
+    form.reset({
+      amount: '',
+      account_id: defaultAccountId,
+      to_account_id: '',
+      category_id: '',
+      date: new Date(),
+      project_id: '',
+      counterparty_id: '',
+      description: '',
+    });
     setModalType(type);
+  };
+
+  const openEditModal = (row: UnifiedRow) => {
+    setEditingId(row.id);
+    form.reset({
+      amount: String(row.amount),
+      account_id: row.accountId,
+      to_account_id: row.toAccountId || '',
+      category_id: row.categoryId || '',
+      date: parseISO(row.date),
+      project_id: row.projectId || '',
+      counterparty_id: row.counterpartyId || '',
+      description: row.description || '',
+    });
+    setModalType(row.type as ModalType);
   };
 
   // Auto-open modal from header "Add New" button
@@ -72,51 +134,44 @@ const Transactions: React.FC = () => {
   const switchModalType = (newType: ModalType) => {
     setModalType(newType);
     // Reset category when switching between income/expense
-    setFormCategoryId('');
+    form.setValue('category_id', '');
   };
 
-  const handleSubmit = async () => {
-    if (!formAmount || !formAccountId) return;
+  const onSubmit = async (values: TransactionFormValues) => {
     setSaving(true);
     const payload: any = {
-      amount: parseFloat(formAmount),
-      account_id: formAccountId,
-      date: format(formDate, 'yyyy-MM-dd'),
+      amount: parseFloat(values.amount),
+      account_id: values.account_id,
+      date: format(values.date, 'yyyy-MM-dd'),
       type: modalType!,
       status: 'APPROVED',
-      description: formDescription || '',
+      description: values.description || '',
     };
     if (modalType === 'TRANSFER') {
-      payload.to_account_id = formToAccountId || null;
+      payload.to_account_id = values.to_account_id || null;
     } else {
-      payload.category_id = formCategoryId || null;
-      payload.project_id = formProjectId || null;
-      payload.counterparty_id = formCounterpartyId || null;
+      payload.category_id = values.category_id || null;
+      payload.project_id = values.project_id || null;
+      payload.counterparty_id = values.counterparty_id || null;
     }
-    const { data, error } = await supabase.from('transactions').insert(payload).select().single();
-    if (!error && data) {
-      setTransactions(prev => [data as unknown as DbTransaction, ...prev]);
+
+    if (editingId) {
+      const { data, error } = await supabase.from('transactions').update(payload).eq('id', editingId).select().single();
+      if (!error && data) {
+        setTransactions(prev => prev.map(t => t.id === editingId ? data as unknown as DbTransaction : t));
+      }
+    } else {
+      const { data, error } = await supabase.from('transactions').insert(payload).select().single();
+      if (!error && data) {
+        setTransactions(prev => [data as unknown as DbTransaction, ...prev]);
+      }
     }
     setSaving(false);
+    setEditingId(null);
     setModalType(null);
   };
 
   // Merge transactions and planned payments into unified list
-  interface UnifiedRow {
-    id: string;
-    date: string;
-    type: string;
-    amount: number;
-    categoryId?: string;
-    projectId?: string;
-    counterpartyId?: string;
-    accountId: string;
-    toAccountId?: string;
-    description: string;
-    status: string;
-    isPlanned: boolean;
-  }
-
   const unifiedRows = useMemo((): UnifiedRow[] => {
     const fromStr = format(dateRange.from, 'yyyy-MM-dd');
     const toStr = format(dateRange.to, 'yyyy-MM-dd');
@@ -251,7 +306,7 @@ const Transactions: React.FC = () => {
   const modalCategories = modalType === 'INCOME' ? incomeCategories : expenseCategories;
 
   return (
-    <div className="p-6 space-y-4">
+    <div className="px-4 md:px-6 py-6 space-y-4">
       {/* Action buttons row */}
       <div className="flex items-center gap-2 flex-wrap">
         <Button size="sm" className="gap-1.5 bg-primary/90 hover:bg-primary/80" onClick={() => openModal('INCOME')}>
@@ -309,7 +364,28 @@ const Transactions: React.FC = () => {
           </PopoverContent>
         </Popover>
 
-        <Button size="sm" variant="outline" className="gap-1.5">
+        <Button size="sm" variant="outline" className="gap-1.5" onClick={() => {
+          const rows = unifiedRows.map(row => ({
+            date: row.date,
+            type: row.type,
+            amount: row.amount,
+            description: row.description,
+            category: getCategoryName(row.categoryId),
+            counterparty: getCounterpartyName(row.counterpartyId) || '',
+            project: getProjectName(row.projectId) || '',
+            account: getAccountName(row.accountId),
+          }));
+          exportToCsv('transactions.csv', rows, [
+            { key: 'date', label: 'Date' },
+            { key: 'type', label: 'Type' },
+            { key: 'amount', label: 'Amount' },
+            { key: 'description', label: 'Description' },
+            { key: 'category', label: 'Category' },
+            { key: 'counterparty', label: 'Counterparty' },
+            { key: 'project', label: 'Project' },
+            { key: 'account', label: 'Account' },
+          ]);
+        }}>
           <Download className="h-4 w-4" /> Export
         </Button>
       </div>
@@ -344,6 +420,9 @@ const Transactions: React.FC = () => {
         </Select>
       </div>
 
+      {/* Table */}
+      <div className="overflow-x-auto">
+      <div className="min-w-[800px]">
       {/* Table Header */}
       <div className="grid grid-cols-[40px_1fr_1fr_1.5fr_1fr_1fr_1fr] items-center gap-2 px-2 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider border-b border-border pb-2">
         <div className="flex items-center justify-center">
@@ -372,8 +451,10 @@ const Transactions: React.FC = () => {
                   className={cn(
                     'grid grid-cols-[40px_1fr_1fr_1.5fr_1fr_1fr_1fr] items-center gap-2 px-2 py-3 border-b border-border/50 hover:bg-muted/30 transition-colors',
                     row.isPlanned && 'opacity-60',
-                    row.type === 'TRANSFER' && 'bg-primary/[0.02]'
+                    row.type === 'TRANSFER' && 'bg-primary/[0.02]',
+                    !row.isPlanned && 'cursor-pointer'
                   )}
+                  onClick={() => { if (!row.isPlanned) openEditModal(row); }}
                 >
                   <div className="flex items-center justify-center">
                     <Checkbox checked={selectedIds.has(row.id)} onCheckedChange={() => toggleSelect(row.id)} />
@@ -427,6 +508,8 @@ const Transactions: React.FC = () => {
           </div>
         ))}
       </div>
+      </div>
+      </div>
 
       {/* Bulk Action Footer */}
       {selectedIds.size > 0 && (
@@ -434,7 +517,7 @@ const Transactions: React.FC = () => {
           <span className="bg-primary text-primary-foreground px-2 py-0.5 rounded text-sm font-semibold">{selectedIds.size}</span>
           <span className="text-sm">selected</span>
           <div className="w-px h-5 bg-background/20" />
-          <button onClick={bulkDelete} className="flex items-center gap-2 text-sm hover:text-rose-400 transition-colors">
+          <button onClick={() => setShowBulkDeleteConfirm(true)} className="flex items-center gap-2 text-sm hover:text-rose-400 transition-colors">
             <Trash2 className="h-4 w-4" /> Delete
           </button>
           <button onClick={() => setSelectedIds(new Set())} className="text-sm hover:opacity-80 transition-opacity ml-2">
@@ -443,12 +526,33 @@ const Transactions: React.FC = () => {
         </div>
       )}
 
+      {/* Bulk Delete Confirmation */}
+      <AlertDialog open={showBulkDeleteConfirm} onOpenChange={setShowBulkDeleteConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {selectedIds.size} transaction{selectedIds.size !== 1 ? 's' : ''}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. The selected transactions will be permanently deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => { bulkDelete(); setShowBulkDeleteConfirm(false); }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* Add Transaction Sidebar */}
-      <Sheet open={modalType !== null} onOpenChange={open => !open && setModalType(null)}>
+      <Sheet open={modalType !== null} onOpenChange={open => { if (!open) { setModalType(null); setEditingId(null); } }}>
         <SheetContent className="w-[440px] sm:w-[440px] flex flex-col p-0">
           <SheetHeader className="px-6 pt-6 pb-4 border-b border-border">
             <SheetTitle className="text-lg">
-              Add{' '}
+              {editingId ? 'Edit' : 'Add'}{' '}
               {modalType === 'TRANSFER' ? (
                 <span>transfer</span>
               ) : (
@@ -462,6 +566,7 @@ const Transactions: React.FC = () => {
             </SheetTitle>
           </SheetHeader>
 
+          <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col flex-1">
           <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
@@ -469,14 +574,17 @@ const Transactions: React.FC = () => {
                 <Input
                   type="number"
                   placeholder="0.00"
-                  value={formAmount}
-                  onChange={e => setFormAmount(e.target.value)}
+                  value={form.watch('amount')}
+                  onChange={e => form.setValue('amount', e.target.value, { shouldValidate: true })}
                   autoFocus
                 />
+                {form.formState.errors.amount && (
+                  <p className="text-sm font-medium text-destructive">{form.formState.errors.amount.message}</p>
+                )}
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs font-medium text-muted-foreground uppercase">{modalType === 'TRANSFER' ? 'From Account *' : 'Account *'}</Label>
-                <Select value={formAccountId} onValueChange={setFormAccountId}>
+                <Select value={form.watch('account_id')} onValueChange={v => form.setValue('account_id', v, { shouldValidate: true })}>
                   <SelectTrigger><SelectValue placeholder="Select account" /></SelectTrigger>
                   <SelectContent>
                     {calculatedAccounts.map(a => (
@@ -484,16 +592,19 @@ const Transactions: React.FC = () => {
                     ))}
                   </SelectContent>
                 </Select>
+                {form.formState.errors.account_id && (
+                  <p className="text-sm font-medium text-destructive">{form.formState.errors.account_id.message}</p>
+                )}
               </div>
             </div>
 
             {modalType === 'TRANSFER' && (
               <div className="space-y-1.5">
                 <Label className="text-xs font-medium text-muted-foreground uppercase">To Account *</Label>
-                <Select value={formToAccountId} onValueChange={setFormToAccountId}>
+                <Select value={form.watch('to_account_id') || ''} onValueChange={v => form.setValue('to_account_id', v)}>
                   <SelectTrigger><SelectValue placeholder="Select account..." /></SelectTrigger>
                   <SelectContent>
-                    {calculatedAccounts.filter(a => a.id !== formAccountId).map(a => (
+                    {calculatedAccounts.filter(a => a.id !== form.watch('account_id')).map(a => (
                       <SelectItem key={a.id} value={a.id}>{a.name} ({a.currency})</SelectItem>
                     ))}
                   </SelectContent>
@@ -505,7 +616,7 @@ const Transactions: React.FC = () => {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <Label className="text-xs font-medium text-muted-foreground uppercase">Category</Label>
-                  <Select value={formCategoryId || 'none'} onValueChange={v => setFormCategoryId(v === 'none' ? '' : v)}>
+                  <Select value={form.watch('category_id') || 'none'} onValueChange={v => form.setValue('category_id', v === 'none' ? '' : v)}>
                     <SelectTrigger><SelectValue placeholder="Select category..." /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">Select category...</SelectItem>
@@ -519,13 +630,13 @@ const Transactions: React.FC = () => {
                   <Label className="text-xs font-medium text-muted-foreground uppercase">Date</Label>
                   <Popover open={formDateOpen} onOpenChange={setFormDateOpen}>
                     <PopoverTrigger asChild>
-                      <Button variant="outline" className="w-full justify-start text-left font-normal">
+                      <Button variant="outline" className="w-full justify-start text-left font-normal" type="button">
                         <CalendarIcon className="h-4 w-4 mr-2" />
-                        {format(formDate, 'dd.MM.yyyy')}
+                        {format(form.watch('date'), 'dd.MM.yyyy')}
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar mode="single" selected={formDate} onSelect={d => { if (d) { setFormDate(d); setFormDateOpen(false); } }} />
+                      <Calendar mode="single" selected={form.watch('date')} onSelect={d => { if (d) { form.setValue('date', d); setFormDateOpen(false); } }} />
                     </PopoverContent>
                   </Popover>
                 </div>
@@ -537,13 +648,13 @@ const Transactions: React.FC = () => {
                 <Label className="text-xs font-medium text-muted-foreground uppercase">Date</Label>
                 <Popover open={formDateOpen} onOpenChange={setFormDateOpen}>
                   <PopoverTrigger asChild>
-                    <Button variant="outline" className="w-full justify-start text-left font-normal">
+                    <Button variant="outline" className="w-full justify-start text-left font-normal" type="button">
                       <CalendarIcon className="h-4 w-4 mr-2" />
-                      {format(formDate, 'dd.MM.yyyy')}
+                      {format(form.watch('date'), 'dd.MM.yyyy')}
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0" align="start">
-                    <Calendar mode="single" selected={formDate} onSelect={d => { if (d) { setFormDate(d); setFormDateOpen(false); } }} />
+                    <Calendar mode="single" selected={form.watch('date')} onSelect={d => { if (d) { form.setValue('date', d); setFormDateOpen(false); } }} />
                   </PopoverContent>
                 </Popover>
               </div>
@@ -553,7 +664,7 @@ const Transactions: React.FC = () => {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <Label className="text-xs font-medium text-muted-foreground uppercase">Project</Label>
-                  <Select value={formProjectId || 'none'} onValueChange={v => setFormProjectId(v === 'none' ? '' : v)}>
+                  <Select value={form.watch('project_id') || 'none'} onValueChange={v => form.setValue('project_id', v === 'none' ? '' : v)}>
                     <SelectTrigger><SelectValue placeholder="Select project..." /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">Select project...</SelectItem>
@@ -563,7 +674,7 @@ const Transactions: React.FC = () => {
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs font-medium text-muted-foreground uppercase">Counterparty</Label>
-                  <Select value={formCounterpartyId || 'none'} onValueChange={v => setFormCounterpartyId(v === 'none' ? '' : v)}>
+                  <Select value={form.watch('counterparty_id') || 'none'} onValueChange={v => form.setValue('counterparty_id', v === 'none' ? '' : v)}>
                     <SelectTrigger><SelectValue placeholder="Select counterparty..." /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">Select counterparty...</SelectItem>
@@ -578,8 +689,8 @@ const Transactions: React.FC = () => {
               <Label className="text-xs font-medium text-muted-foreground uppercase">Description</Label>
               <Textarea
                 placeholder="Enter description..."
-                value={formDescription}
-                onChange={e => setFormDescription(e.target.value)}
+                value={form.watch('description') || ''}
+                onChange={e => form.setValue('description', e.target.value)}
                 className="min-h-[80px]"
               />
             </div>
@@ -587,10 +698,11 @@ const Transactions: React.FC = () => {
 
           {/* Fixed bottom button */}
           <div className="border-t border-border px-6 py-4 bg-card">
-            <Button onClick={handleSubmit} disabled={saving || !formAmount || !formAccountId} className="w-full">
-              {saving ? 'Saving...' : 'Add Transaction'}
+            <Button type="submit" disabled={saving} className="w-full">
+              {saving ? 'Saving...' : editingId ? 'Save Changes' : 'Add Transaction'}
             </Button>
           </div>
+          </form>
         </SheetContent>
       </Sheet>
     </div>

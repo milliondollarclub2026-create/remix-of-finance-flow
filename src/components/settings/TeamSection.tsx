@@ -6,10 +6,20 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Plus, Copy, Check, Pencil, Trash2, RefreshCw, Eye, EyeOff, Power } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
+import { z } from 'zod';
+
+const teamMemberSchema = z.object({
+  name: z.string().min(1, 'Name is required'),
+  email: z.string().min(1, 'Email is required').email('Invalid email address'),
+});
 
 export const TeamSection: React.FC<{ onDirty: () => void }> = ({ onDirty }) => {
   const { profiles, roles, refetchAll } = useData();
@@ -24,6 +34,8 @@ export const TeamSection: React.FC<{ onDirty: () => void }> = ({ onDirty }) => {
   const [credentialsView, setCredentialsView] = useState<{ email: string; password: string } | null>(null);
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<any>(null);
+  const [formErrors, setFormErrors] = useState<{ name?: string; email?: string }>({});
 
   const generatePassword = () => {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$';
@@ -53,6 +65,17 @@ export const TeamSection: React.FC<{ onDirty: () => void }> = ({ onDirty }) => {
   };
 
   const handleSave = async () => {
+    const result = teamMemberSchema.safeParse({ name: formName, email: formEmail });
+    if (!result.success) {
+      const fieldErrors: { name?: string; email?: string } = {};
+      for (const issue of result.error.issues) {
+        const field = issue.path[0] as 'name' | 'email';
+        if (!fieldErrors[field]) fieldErrors[field] = issue.message;
+      }
+      setFormErrors(fieldErrors);
+      return;
+    }
+    setFormErrors({});
     setLoading(true);
     try {
       const { data, error } = await supabase.functions.invoke('manage-user', {
@@ -93,7 +116,6 @@ export const TeamSection: React.FC<{ onDirty: () => void }> = ({ onDirty }) => {
   };
 
   const handleDelete = async (profile: any) => {
-    if (!confirm('Delete this user?')) return;
     await supabase.functions.invoke('manage-user', {
       body: { action: 'delete', profile_id: profile.id, user_id: profile.user_id },
     });
@@ -196,7 +218,7 @@ export const TeamSection: React.FC<{ onDirty: () => void }> = ({ onDirty }) => {
                 <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(u)}>
                   <Pencil className="h-3.5 w-3.5" />
                 </Button>
-                <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDelete(u)} disabled={isAdmin(u)}>
+                <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => setDeleteTarget(u)} disabled={isAdmin(u)}>
                   <Trash2 className="h-3.5 w-3.5" />
                 </Button>
               </div>
@@ -230,12 +252,14 @@ export const TeamSection: React.FC<{ onDirty: () => void }> = ({ onDirty }) => {
           ) : (
             <div className="space-y-4">
               <div className="space-y-1.5">
-                <Label className="text-xs font-medium text-muted-foreground uppercase">Full Name</Label>
-                <Input value={formName} onChange={e => setFormName(e.target.value)} autoFocus />
+                <Label className="text-xs font-medium text-muted-foreground uppercase">Full Name <span className="text-destructive">*</span></Label>
+                <Input value={formName} onChange={e => { setFormName(e.target.value); if (formErrors.name) setFormErrors(prev => ({ ...prev, name: undefined })); }} autoFocus />
+                {formErrors.name && <p className="text-sm font-medium text-destructive">{formErrors.name}</p>}
               </div>
               <div className="space-y-1.5">
-                <Label className="text-xs font-medium text-muted-foreground uppercase">Email Address</Label>
-                <Input type="email" value={formEmail} onChange={e => setFormEmail(e.target.value)} />
+                <Label className="text-xs font-medium text-muted-foreground uppercase">Email Address <span className="text-destructive">*</span></Label>
+                <Input type="email" value={formEmail} onChange={e => { setFormEmail(e.target.value); if (formErrors.email) setFormErrors(prev => ({ ...prev, email: undefined })); }} />
+                {formErrors.email && <p className="text-sm font-medium text-destructive">{formErrors.email}</p>}
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs font-medium text-muted-foreground uppercase">Role</Label>
@@ -281,6 +305,27 @@ export const TeamSection: React.FC<{ onDirty: () => void }> = ({ onDirty }) => {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Delete User Confirmation */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={open => { if (!open) setDeleteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete user "{deleteTarget?.name}"?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. The user will be permanently removed from the system.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => { handleDelete(deleteTarget); setDeleteTarget(null); }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

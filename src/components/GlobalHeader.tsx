@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Plus, ChevronUp, TrendingUp, TrendingDown, ArrowRight } from 'lucide-react';
+import { Plus, ChevronUp, TrendingUp, TrendingDown, ArrowRight, Sun, Moon, Monitor } from 'lucide-react';
+import { useTheme } from 'next-themes';
 import { useData } from '@/contexts/DataContext';
 
 const PAGE_NAMES: Record<string, string> = {
@@ -20,6 +21,13 @@ export const GlobalHeader: React.FC = () => {
   const navigate = useNavigate();
   const { calculatedAccounts } = useData();
   const [addOpen, setAddOpen] = useState(false);
+  const { theme, setTheme } = useTheme();
+
+  const cycleTheme = () => {
+    if (theme === 'light') setTheme('dark');
+    else if (theme === 'dark') setTheme('system');
+    else setTheme('light');
+  };
 
   const pageName = PAGE_NAMES[pathname] || PAGE_NAMES[Object.keys(PAGE_NAMES).find(k => k !== '/' && pathname.startsWith(k)) || ''] || 'Page';
   const totalCash = calculatedAccounts.reduce((s, a) => s + a.balance, 0);
@@ -39,6 +47,22 @@ export const GlobalHeader: React.FC = () => {
       <h1 className="text-lg font-semibold">{pageName}</h1>
 
       <div className="flex items-center gap-4">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={cycleTheme}
+          className="h-8 w-8"
+          title={`Theme: ${theme}`}
+        >
+          {theme === 'dark' ? (
+            <Moon className="h-4 w-4" />
+          ) : theme === 'system' ? (
+            <Monitor className="h-4 w-4" />
+          ) : (
+            <Sun className="h-4 w-4" />
+          )}
+        </Button>
+
         <div className="text-right">
           <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Business Cash</p>
           <p className="text-sm font-semibold">{formatCurrency(totalCash)}</p>

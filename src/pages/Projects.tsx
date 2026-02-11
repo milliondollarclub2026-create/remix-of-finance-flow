@@ -22,6 +22,23 @@ import { format, parseISO, startOfMonth, endOfMonth, addMonths, subMonths, getDa
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis, ReferenceLine } from 'recharts';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+
+const projectSchema = z.object({
+  name: z.string().min(2, 'Name must be at least 2 characters'),
+  status: z.enum(['ACTIVE', 'COMPLETED', 'ARCHIVED'], { required_error: 'Status is required' }),
+  manager_id: z.string().optional(),
+  business_line_id: z.string().optional(),
+  description: z.string().optional(),
+  start_date: z.date().optional(),
+  end_date: z.date().optional(),
+  planned_revenue: z.string().optional().refine(v => !v || v === '0' || (!isNaN(Number(v)) && Number(v) >= 0), 'Must be a positive number'),
+  planned_expenses: z.string().optional().refine(v => !v || v === '0' || (!isNaN(Number(v)) && Number(v) >= 0), 'Must be a positive number'),
+});
+
+type ProjectFormValues = z.infer<typeof projectSchema>;
 
 // ===== PROJECTS LIST VIEW =====
 
@@ -40,45 +57,52 @@ const ProjectsList: React.FC = () => {
   const [managerFilter, setManagerFilter] = useState('all');
 
   // Form state
-  const [formName, setFormName] = useState('');
-  const [formStatus, setFormStatus] = useState('ACTIVE');
-  const [formManagerId, setFormManagerId] = useState('none');
-  const [formBLId, setFormBLId] = useState('none');
-  const [formDescription, setFormDescription] = useState('');
-  const [formStartDate, setFormStartDate] = useState<Date | undefined>();
-  const [formEndDate, setFormEndDate] = useState<Date | undefined>();
-  const [formPlannedRevenue, setFormPlannedRevenue] = useState('0');
-  const [formPlannedExpenses, setFormPlannedExpenses] = useState('0');
   const [startDateOpen, setStartDateOpen] = useState(false);
   const [endDateOpen, setEndDateOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  const projForm = useForm<ProjectFormValues>({
+    resolver: zodResolver(projectSchema),
+    defaultValues: {
+      name: '',
+      status: 'ACTIVE',
+      manager_id: 'none',
+      business_line_id: 'none',
+      description: '',
+      start_date: undefined,
+      end_date: undefined,
+      planned_revenue: '0',
+      planned_expenses: '0',
+    },
+  });
+
   const openCreate = () => {
-    setFormName('');
-    setFormStatus('ACTIVE');
-    setFormManagerId('none');
-    setFormBLId('none');
-    setFormDescription('');
-    setFormStartDate(undefined);
-    setFormEndDate(undefined);
-    setFormPlannedRevenue('0');
-    setFormPlannedExpenses('0');
+    projForm.reset({
+      name: '',
+      status: 'ACTIVE',
+      manager_id: 'none',
+      business_line_id: 'none',
+      description: '',
+      start_date: undefined,
+      end_date: undefined,
+      planned_revenue: '0',
+      planned_expenses: '0',
+    });
     setCreateOpen(true);
   };
 
-  const handleCreate = async () => {
-    if (!formName.trim()) return;
+  const handleCreate = async (values: ProjectFormValues) => {
     setSaving(true);
     const payload: any = {
-      name: formName.trim(),
-      status: formStatus,
-      planned_income: parseFloat(formPlannedRevenue) || 0,
-      planned_expense: parseFloat(formPlannedExpenses) || 0,
-      description: formDescription,
-      manager_id: formManagerId !== 'none' ? formManagerId : null,
-      business_line_id: formBLId !== 'none' ? formBLId : null,
-      start_date: formStartDate ? format(formStartDate, 'yyyy-MM-dd') : null,
-      end_date: formEndDate ? format(formEndDate, 'yyyy-MM-dd') : null,
+      name: values.name.trim(),
+      status: values.status,
+      planned_income: parseFloat(values.planned_revenue || '0') || 0,
+      planned_expense: parseFloat(values.planned_expenses || '0') || 0,
+      description: values.description || '',
+      manager_id: values.manager_id !== 'none' ? values.manager_id : null,
+      business_line_id: values.business_line_id !== 'none' ? values.business_line_id : null,
+      start_date: values.start_date ? format(values.start_date, 'yyyy-MM-dd') : null,
+      end_date: values.end_date ? format(values.end_date, 'yyyy-MM-dd') : null,
     };
     const { data, error } = await supabase.from('projects').insert(payload).select().single();
     if (!error && data) {
@@ -136,7 +160,7 @@ const ProjectsList: React.FC = () => {
   };
 
   return (
-    <div className="p-6 space-y-4">
+    <div className="px-4 md:px-6 py-6 space-y-4">
       {/* Toolbar */}
       <div className="flex items-center gap-3 flex-wrap">
         <Button size="sm" className="gap-1.5" onClick={openCreate}>
@@ -182,7 +206,8 @@ const ProjectsList: React.FC = () => {
       </div>
 
       {/* Table */}
-      <div className="bg-card rounded-lg border border-border">
+      <div className="bg-card rounded-lg border border-border overflow-x-auto">
+        <div className="min-w-[700px]">
         {/* Header */}
         <div className="grid grid-cols-[2fr_1fr_1fr_1fr_0.7fr] items-center gap-4 px-6 py-3 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider border-b border-border">
           <div>Project</div>
@@ -305,6 +330,7 @@ const ProjectsList: React.FC = () => {
             </div>
           </div>
         )}
+        </div>
       </div>
 
       {/* CREATE PROJECT DIALOG */}
@@ -313,16 +339,19 @@ const ProjectsList: React.FC = () => {
           <SheetHeader>
             <SheetTitle>New Project</SheetTitle>
           </SheetHeader>
-          <div className="space-y-4">
+          <form onSubmit={projForm.handleSubmit(handleCreate)} className="space-y-4">
             <div>
               <Label className="text-xs font-semibold text-muted-foreground uppercase">Project Name <span className="text-destructive">*</span></Label>
-              <Input value={formName} onChange={e => setFormName(e.target.value)} placeholder="e.g. Mobile App Redesign" className="mt-1" />
+              <Input value={projForm.watch('name')} onChange={e => projForm.setValue('name', e.target.value, { shouldValidate: true })} placeholder="e.g. Mobile App Redesign" className="mt-1" />
+              {projForm.formState.errors.name && (
+                <p className="text-sm font-medium text-destructive mt-1">{projForm.formState.errors.name.message}</p>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label className="text-xs font-semibold text-muted-foreground uppercase">Status</Label>
-                <Select value={formStatus} onValueChange={setFormStatus}>
+                <Select value={projForm.watch('status')} onValueChange={v => projForm.setValue('status', v as 'ACTIVE' | 'COMPLETED' | 'ARCHIVED')}>
                   <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="ACTIVE">Active</SelectItem>
@@ -333,7 +362,7 @@ const ProjectsList: React.FC = () => {
               </div>
               <div>
                 <Label className="text-xs font-semibold text-muted-foreground uppercase">Manager</Label>
-                <Select value={formManagerId} onValueChange={setFormManagerId}>
+                <Select value={projForm.watch('manager_id') || 'none'} onValueChange={v => projForm.setValue('manager_id', v)}>
                   <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">None</SelectItem>
@@ -345,7 +374,7 @@ const ProjectsList: React.FC = () => {
 
             <div>
               <Label className="text-xs font-semibold text-muted-foreground uppercase">Business Line</Label>
-              <Select value={formBLId} onValueChange={setFormBLId}>
+              <Select value={projForm.watch('business_line_id') || 'none'} onValueChange={v => projForm.setValue('business_line_id', v)}>
                 <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">None</SelectItem>
@@ -356,7 +385,7 @@ const ProjectsList: React.FC = () => {
 
             <div>
               <Label className="text-xs font-semibold text-muted-foreground uppercase">Description</Label>
-              <Textarea value={formDescription} onChange={e => setFormDescription(e.target.value)} placeholder="Goals, scope, details..." className="mt-1" rows={3} />
+              <Textarea value={projForm.watch('description') || ''} onChange={e => projForm.setValue('description', e.target.value)} placeholder="Goals, scope, details..." className="mt-1" rows={3} />
             </div>
 
             <div className="border-t pt-4">
@@ -369,24 +398,24 @@ const ProjectsList: React.FC = () => {
                   <Label className="text-xs font-semibold text-muted-foreground uppercase">Start Date</Label>
                   <Popover open={startDateOpen} onOpenChange={setStartDateOpen}>
                     <PopoverTrigger asChild>
-                      <Button variant="outline" className="w-full justify-start text-left font-normal mt-1">
+                      <Button variant="outline" className="w-full justify-start text-left font-normal mt-1" type="button">
                         <CalendarIcon className="mr-2 h-4 w-4" />
-                        {formStartDate ? format(formStartDate, 'dd/MM/yyyy') : 'dd/mm/yyyy'}
+                        {projForm.watch('start_date') ? format(projForm.watch('start_date')!, 'dd/MM/yyyy') : 'dd/mm/yyyy'}
                       </Button>
                     </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0"><Calendar mode="single" selected={formStartDate} onSelect={d => { setFormStartDate(d); setStartDateOpen(false); }} /></PopoverContent>
+                    <PopoverContent className="w-auto p-0"><Calendar mode="single" selected={projForm.watch('start_date')} onSelect={d => { projForm.setValue('start_date', d); setStartDateOpen(false); }} /></PopoverContent>
                   </Popover>
                 </div>
                 <div>
                   <Label className="text-xs font-semibold text-muted-foreground uppercase">End Date</Label>
                   <Popover open={endDateOpen} onOpenChange={setEndDateOpen}>
                     <PopoverTrigger asChild>
-                      <Button variant="outline" className="w-full justify-start text-left font-normal mt-1">
+                      <Button variant="outline" className="w-full justify-start text-left font-normal mt-1" type="button">
                         <CalendarIcon className="mr-2 h-4 w-4" />
-                        {formEndDate ? format(formEndDate, 'dd/MM/yyyy') : 'dd/mm/yyyy'}
+                        {projForm.watch('end_date') ? format(projForm.watch('end_date')!, 'dd/MM/yyyy') : 'dd/mm/yyyy'}
                       </Button>
                     </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0"><Calendar mode="single" selected={formEndDate} onSelect={d => { setFormEndDate(d); setEndDateOpen(false); }} /></PopoverContent>
+                    <PopoverContent className="w-auto p-0"><Calendar mode="single" selected={projForm.watch('end_date')} onSelect={d => { projForm.setValue('end_date', d); setEndDateOpen(false); }} /></PopoverContent>
                   </Popover>
                 </div>
               </div>
@@ -399,23 +428,29 @@ const ProjectsList: React.FC = () => {
                   <Label className="text-xs font-semibold text-muted-foreground uppercase">Planned Revenue</Label>
                   <div className="relative mt-1">
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
-                    <Input value={formPlannedRevenue} onChange={e => setFormPlannedRevenue(e.target.value)} className="pl-7" type="number" />
+                    <Input value={projForm.watch('planned_revenue') || '0'} onChange={e => projForm.setValue('planned_revenue', e.target.value, { shouldValidate: true })} className="pl-7" type="number" />
                   </div>
+                  {projForm.formState.errors.planned_revenue && (
+                    <p className="text-sm font-medium text-destructive mt-1">{projForm.formState.errors.planned_revenue.message}</p>
+                  )}
                 </div>
                 <div>
                   <Label className="text-xs font-semibold text-muted-foreground uppercase">Planned Expenses</Label>
                   <div className="relative mt-1">
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
-                    <Input value={formPlannedExpenses} onChange={e => setFormPlannedExpenses(e.target.value)} className="pl-7" type="number" />
+                    <Input value={projForm.watch('planned_expenses') || '0'} onChange={e => projForm.setValue('planned_expenses', e.target.value, { shouldValidate: true })} className="pl-7" type="number" />
                   </div>
+                  {projForm.formState.errors.planned_expenses && (
+                    <p className="text-sm font-medium text-destructive mt-1">{projForm.formState.errors.planned_expenses.message}</p>
+                  )}
                 </div>
               </div>
             </div>
 
-            <Button className="w-full" onClick={handleCreate} disabled={saving || !formName.trim()}>
+            <Button type="submit" className="w-full" disabled={saving}>
               {saving ? 'Creating...' : 'Create Project'}
             </Button>
-          </div>
+          </form>
         </SheetContent>
       </Sheet>
     </div>
@@ -428,14 +463,69 @@ const ProjectDetail: React.FC<{ projectId: string }> = ({ projectId }) => {
   const {
     projects, transactions, plannedPayments, accounts, categories,
     counterparties, profiles, businessLines, calculatedAccounts,
-    setTransactions,
+    setTransactions, setProjects,
   } = useData();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('overview');
   const [calMonth, setCalMonth] = useState(new Date());
+  const [editOpen, setEditOpen] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editStartDateOpen, setEditStartDateOpen] = useState(false);
+  const [editEndDateOpen, setEditEndDateOpen] = useState(false);
 
   const project = projects.find(p => p.id === projectId);
   if (!project) return <div className="p-6 text-muted-foreground">Project not found</div>;
+
+  const editForm = useForm<ProjectFormValues>({
+    resolver: zodResolver(projectSchema),
+    defaultValues: {
+      name: project.name,
+      status: project.status as 'ACTIVE' | 'COMPLETED' | 'ARCHIVED',
+      manager_id: project.manager_id || 'none',
+      business_line_id: project.business_line_id || 'none',
+      description: project.description || '',
+      start_date: project.start_date ? parseISO(project.start_date) : undefined,
+      end_date: project.end_date ? parseISO(project.end_date) : undefined,
+      planned_revenue: String(project.planned_income || 0),
+      planned_expenses: String(project.planned_expense || 0),
+    },
+  });
+
+  const openEdit = () => {
+    editForm.reset({
+      name: project.name,
+      status: project.status as 'ACTIVE' | 'COMPLETED' | 'ARCHIVED',
+      manager_id: project.manager_id || 'none',
+      business_line_id: project.business_line_id || 'none',
+      description: project.description || '',
+      start_date: project.start_date ? parseISO(project.start_date) : undefined,
+      end_date: project.end_date ? parseISO(project.end_date) : undefined,
+      planned_revenue: String(project.planned_income || 0),
+      planned_expenses: String(project.planned_expense || 0),
+    });
+    setEditOpen(true);
+  };
+
+  const handleEdit = async (values: ProjectFormValues) => {
+    setEditSaving(true);
+    const payload: any = {
+      name: values.name.trim(),
+      status: values.status,
+      planned_income: parseFloat(values.planned_revenue || '0') || 0,
+      planned_expense: parseFloat(values.planned_expenses || '0') || 0,
+      description: values.description || '',
+      manager_id: values.manager_id !== 'none' ? values.manager_id : null,
+      business_line_id: values.business_line_id !== 'none' ? values.business_line_id : null,
+      start_date: values.start_date ? format(values.start_date, 'yyyy-MM-dd') : null,
+      end_date: values.end_date ? format(values.end_date, 'yyyy-MM-dd') : null,
+    };
+    const { data, error } = await supabase.from('projects').update(payload).eq('id', projectId).select().single();
+    if (!error && data) {
+      setProjects(prev => prev.map(p => p.id === projectId ? data as unknown as DbProject : p));
+    }
+    setEditSaving(false);
+    setEditOpen(false);
+  };
 
   const manager = profiles.find(p => p.id === project.manager_id);
   const bl = businessLines.find(b => b.id === project.business_line_id);
@@ -486,7 +576,7 @@ const ProjectDetail: React.FC<{ projectId: string }> = ({ projectId }) => {
   const docsCount = 0;
 
   return (
-    <div className="p-6 space-y-4">
+    <div className="px-4 md:px-6 py-6 space-y-4">
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
@@ -505,7 +595,7 @@ const ProjectDetail: React.FC<{ projectId: string }> = ({ projectId }) => {
             )}
           </div>
         </div>
-        <Button variant="ghost" size="icon"><MoreVertical className="h-5 w-5" /></Button>
+        <Button variant="ghost" size="icon" onClick={openEdit}><MoreVertical className="h-5 w-5" /></Button>
       </div>
 
       {/* Tabs */}
@@ -532,7 +622,7 @@ const ProjectDetail: React.FC<{ projectId: string }> = ({ projectId }) => {
           {/* KPI Cards */}
           <Card>
             <CardContent className="p-0">
-              <div className="grid grid-cols-5 divide-x divide-border">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 divide-x divide-border">
                 <div className="p-5">
                   <p className="text-xs text-muted-foreground">Gross Profit</p>
                   <p className="text-2xl font-bold text-emerald-600">{fmt(grossProfit)}</p>
@@ -562,7 +652,8 @@ const ProjectDetail: React.FC<{ projectId: string }> = ({ projectId }) => {
           </Card>
 
           {/* Transactions Ledger */}
-          <div>
+          <div className="overflow-x-auto">
+            <div className="min-w-[700px]">
             <h3 className="text-lg font-semibold mb-3">Transactions</h3>
             {/* Table Header */}
             <div className="grid grid-cols-[40px_100px_1fr_1.5fr_1fr_1fr] items-center gap-2 px-3 py-2 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider border-b border-border">
@@ -599,6 +690,7 @@ const ProjectDetail: React.FC<{ projectId: string }> = ({ projectId }) => {
                 </div>
               ))
             )}
+            </div>
           </div>
         </TabsContent>
 
@@ -617,6 +709,127 @@ const ProjectDetail: React.FC<{ projectId: string }> = ({ projectId }) => {
           <DocumentsTab projectId={projectId} />
         </TabsContent>
       </Tabs>
+
+      {/* EDIT PROJECT SHEET */}
+      <Sheet open={editOpen} onOpenChange={setEditOpen}>
+        <SheetContent className="sm:max-w-lg flex flex-col overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle>Edit Project</SheetTitle>
+          </SheetHeader>
+          <form onSubmit={editForm.handleSubmit(handleEdit)} className="space-y-4">
+            <div>
+              <Label className="text-xs font-semibold text-muted-foreground uppercase">Project Name <span className="text-destructive">*</span></Label>
+              <Input value={editForm.watch('name')} onChange={e => editForm.setValue('name', e.target.value, { shouldValidate: true })} placeholder="e.g. Mobile App Redesign" className="mt-1" />
+              {editForm.formState.errors.name && (
+                <p className="text-sm font-medium text-destructive mt-1">{editForm.formState.errors.name.message}</p>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label className="text-xs font-semibold text-muted-foreground uppercase">Status</Label>
+                <Select value={editForm.watch('status')} onValueChange={v => editForm.setValue('status', v as 'ACTIVE' | 'COMPLETED' | 'ARCHIVED')}>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ACTIVE">Active</SelectItem>
+                    <SelectItem value="COMPLETED">Completed</SelectItem>
+                    <SelectItem value="ARCHIVED">Archived</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs font-semibold text-muted-foreground uppercase">Manager</Label>
+                <Select value={editForm.watch('manager_id') || 'none'} onValueChange={v => editForm.setValue('manager_id', v)}>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    {profiles.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div>
+              <Label className="text-xs font-semibold text-muted-foreground uppercase">Business Line</Label>
+              <Select value={editForm.watch('business_line_id') || 'none'} onValueChange={v => editForm.setValue('business_line_id', v)}>
+                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None</SelectItem>
+                  {businessLines.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <Label className="text-xs font-semibold text-muted-foreground uppercase">Description</Label>
+              <Textarea value={editForm.watch('description') || ''} onChange={e => editForm.setValue('description', e.target.value)} placeholder="Goals, scope, details..." className="mt-1" rows={3} />
+            </div>
+
+            <div className="border-t pt-4">
+              <div className="flex items-center gap-2 mb-3">
+                <CalendarIcon className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm font-semibold">Timeline</span>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label className="text-xs font-semibold text-muted-foreground uppercase">Start Date</Label>
+                  <Popover open={editStartDateOpen} onOpenChange={setEditStartDateOpen}>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" className="w-full justify-start text-left font-normal mt-1" type="button">
+                        <CalendarIcon className="mr-2 h-4 w-4" />
+                        {editForm.watch('start_date') ? format(editForm.watch('start_date')!, 'dd/MM/yyyy') : 'dd/mm/yyyy'}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0"><Calendar mode="single" selected={editForm.watch('start_date')} onSelect={d => { editForm.setValue('start_date', d); setEditStartDateOpen(false); }} /></PopoverContent>
+                  </Popover>
+                </div>
+                <div>
+                  <Label className="text-xs font-semibold text-muted-foreground uppercase">End Date</Label>
+                  <Popover open={editEndDateOpen} onOpenChange={setEditEndDateOpen}>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" className="w-full justify-start text-left font-normal mt-1" type="button">
+                        <CalendarIcon className="mr-2 h-4 w-4" />
+                        {editForm.watch('end_date') ? format(editForm.watch('end_date')!, 'dd/MM/yyyy') : 'dd/mm/yyyy'}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0"><Calendar mode="single" selected={editForm.watch('end_date')} onSelect={d => { editForm.setValue('end_date', d); setEditEndDateOpen(false); }} /></PopoverContent>
+                  </Popover>
+                </div>
+              </div>
+            </div>
+
+            <div className="border-t pt-4">
+              <p className="text-sm font-semibold mb-3">Financial Plan</p>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label className="text-xs font-semibold text-muted-foreground uppercase">Planned Revenue</Label>
+                  <div className="relative mt-1">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
+                    <Input value={editForm.watch('planned_revenue') || '0'} onChange={e => editForm.setValue('planned_revenue', e.target.value, { shouldValidate: true })} className="pl-7" type="number" />
+                  </div>
+                  {editForm.formState.errors.planned_revenue && (
+                    <p className="text-sm font-medium text-destructive mt-1">{editForm.formState.errors.planned_revenue.message}</p>
+                  )}
+                </div>
+                <div>
+                  <Label className="text-xs font-semibold text-muted-foreground uppercase">Planned Expenses</Label>
+                  <div className="relative mt-1">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
+                    <Input value={editForm.watch('planned_expenses') || '0'} onChange={e => editForm.setValue('planned_expenses', e.target.value, { shouldValidate: true })} className="pl-7" type="number" />
+                  </div>
+                  {editForm.formState.errors.planned_expenses && (
+                    <p className="text-sm font-medium text-destructive mt-1">{editForm.formState.errors.planned_expenses.message}</p>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <Button type="submit" className="w-full" disabled={editSaving}>
+              {editSaving ? 'Saving...' : 'Save Changes'}
+            </Button>
+          </form>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 };

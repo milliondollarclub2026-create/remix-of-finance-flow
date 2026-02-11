@@ -242,7 +242,7 @@ const Calendar: React.FC = () => {
   const expenseCategories = categories.filter(c => c.type === 'EXPENSE');
 
   return (
-    <div className="p-6 space-y-4">
+    <div className="px-4 md:px-6 py-6 space-y-4">
       {/* Toolbar */}
       <div className="flex items-center gap-3 flex-wrap">
         <div className="flex items-center gap-2">
@@ -387,7 +387,8 @@ const Calendar: React.FC = () => {
       )}
 
       {/* Calendar Grid */}
-      <div className="border border-border rounded-3xl overflow-hidden bg-card">
+      <div className="border border-border rounded-3xl overflow-hidden bg-card overflow-x-auto">
+        <div className="min-w-[768px]">
         <div className="grid grid-cols-7 border-b border-border">
           {WEEKDAYS.map(day => (
             <div key={day} className="px-3 py-2 text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">
@@ -463,6 +464,7 @@ const Calendar: React.FC = () => {
             );
           })}
         </div>
+        </div>
       </div>
 
       {/* Day Drill-Down Modal */}
@@ -482,7 +484,8 @@ const Calendar: React.FC = () => {
                 </DialogTitle>
               </DialogHeader>
 
-              <div className="mt-4">
+              <div className="mt-4 overflow-x-auto">
+                <div className="min-w-[600px]">
                 <div className="grid grid-cols-[1fr_1fr_1.5fr_1fr_1fr_1fr] gap-2 px-2 text-[10px] font-semibold text-primary uppercase tracking-wider border-b pb-2">
                   <div>Date</div>
                   <div>Operation</div>
@@ -535,6 +538,7 @@ const Calendar: React.FC = () => {
                       ))}
                     </>
                   )}
+                </div>
                 </div>
 
                 <div className="flex items-center justify-between pt-3 mt-3 border-t">

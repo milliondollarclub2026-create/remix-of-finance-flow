@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useData } from '@/contexts/DataContext';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { supabase } from '@/integrations/supabase/client';
+import { Check } from 'lucide-react';
 
 export const OrganizationSection: React.FC<{ onDirty: () => void }> = ({ onDirty }) => {
   const { companySettings, setCompanySettings, accounts } = useData();
@@ -13,6 +14,9 @@ export const OrganizationSection: React.FC<{ onDirty: () => void }> = ({ onDirty
     name: '', business_type: 'LLC',
     base_currency: 'USD', default_account_id: '',
   });
+  const [nameError, setNameError] = useState('');
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (companySettings) {
@@ -26,18 +30,44 @@ export const OrganizationSection: React.FC<{ onDirty: () => void }> = ({ onDirty
   }, [companySettings]);
 
   const update = async (field: string, value: string) => {
+    if (field === 'name') {
+      if (!value.trim()) {
+        setNameError('Company name is required');
+        setForm(prev => ({ ...prev, [field]: value }));
+        return;
+      }
+      setNameError('');
+    }
     setForm(prev => ({ ...prev, [field]: value }));
     onDirty();
+    setSaveStatus('saving');
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     if (companySettings?.id) {
       await supabase.from('company_settings').update({ [field]: value } as any).eq('id', companySettings.id);
     } else {
       const { data } = await supabase.from('company_settings').insert({ [field]: value } as any).select().single();
       if (data) setCompanySettings(data as any);
     }
+    setSaveStatus('saved');
+    saveTimerRef.current = setTimeout(() => setSaveStatus('idle'), 2000);
   };
 
   return (
     <div className="space-y-6">
+      {/* Save Status Indicator */}
+      {saveStatus !== 'idle' && (
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground animate-in fade-in duration-200">
+          {saveStatus === 'saving' ? (
+            <span>Saving...</span>
+          ) : (
+            <>
+              <Check className="h-3.5 w-3.5 text-emerald-600" />
+              <span className="text-emerald-600 font-medium">Saved</span>
+            </>
+          )}
+        </div>
+      )}
+
       {/* General Info */}
       <Card>
         <CardContent className="pt-6 space-y-4">
@@ -46,6 +76,7 @@ export const OrganizationSection: React.FC<{ onDirty: () => void }> = ({ onDirty
             <div className="space-y-1.5">
               <Label className="text-xs font-medium text-muted-foreground uppercase">Company Name <span className="text-destructive">*</span></Label>
               <Input value={form.name} onChange={e => update('name', e.target.value)} />
+              {nameError && <p className="text-sm font-medium text-destructive">{nameError}</p>}
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs font-medium text-muted-foreground uppercase">Business Type</Label>

@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useData } from '@/contexts/DataContext';
 import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -7,22 +7,27 @@ import { Button } from '@/components/ui/button';
 import { TrendingUp, TrendingDown, DollarSign, Download, Building2, Landmark } from 'lucide-react';
 import { parseISO, isBefore, isAfter } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { exportToCsv } from '@/lib/exportCsv';
 
 const Analytics: React.FC = () => {
   const {
     transactions, categories, accounts, counterparties,
     calculatedAccounts, dateRange, loading,
+    selectedAccountId, selectedProjectId,
   } = useData();
 
+  const [activeTab, setActiveTab] = useState('pnl');
   const { from, to } = dateRange;
 
   const rangeTransactions = useMemo(() => {
     return transactions.filter(t => {
       if (t.status !== 'APPROVED') return false;
+      if (selectedAccountId !== 'all' && t.account_id !== selectedAccountId) return false;
+      if (selectedProjectId !== 'all' && t.project_id !== selectedProjectId) return false;
       const td = parseISO(t.date);
       return !isBefore(td, from) && !isAfter(td, to);
     });
-  }, [transactions, from, to]);
+  }, [transactions, from, to, selectedAccountId, selectedProjectId]);
 
   const totalIncome = useMemo(() => rangeTransactions.filter(t => t.type === 'INCOME').reduce((s, t) => s + Number(t.amount), 0), [rangeTransactions]);
   const totalExpense = useMemo(() => rangeTransactions.filter(t => t.type === 'EXPENSE').reduce((s, t) => s + Number(t.amount), 0), [rangeTransactions]);
@@ -61,10 +66,18 @@ const Analytics: React.FC = () => {
   }, [rangeTransactions, categories, accounts]);
 
   const balanceSheet = useMemo(() => {
-    const cashAccounts = calculatedAccounts.filter(a => a.balance > 0).sort((a, b) => b.balance - a.balance);
+    const relevantAccounts = selectedAccountId !== 'all'
+      ? calculatedAccounts.filter(a => a.id === selectedAccountId)
+      : calculatedAccounts;
+    const cashAccounts = relevantAccounts.filter(a => a.balance > 0).sort((a, b) => b.balance - a.balance);
     const totalCash = cashAccounts.reduce((s, a) => s + a.balance, 0);
     const cpBalances = counterparties.map(cp => {
-      const cpTxns = transactions.filter(t => t.counterparty_id === cp.id && t.status === 'APPROVED');
+      const cpTxns = transactions.filter(t => {
+        if (t.counterparty_id !== cp.id || t.status !== 'APPROVED') return false;
+        if (selectedAccountId !== 'all' && t.account_id !== selectedAccountId) return false;
+        if (selectedProjectId !== 'all' && t.project_id !== selectedProjectId) return false;
+        return true;
+      });
       const inc = cpTxns.filter(t => t.type === 'INCOME').reduce((s, t) => s + Number(t.amount), 0);
       const exp = cpTxns.filter(t => t.type === 'EXPENSE').reduce((s, t) => s + Number(t.amount), 0);
       return { ...cp, balance: inc - exp };
@@ -76,7 +89,7 @@ const Analytics: React.FC = () => {
     const totalAssets = totalCash + totalReceivables;
     const equity = totalAssets - totalPayables;
     return { cashAccounts, totalCash, receivables, totalReceivables, payables, totalPayables, totalAssets, equity };
-  }, [calculatedAccounts, counterparties, transactions]);
+  }, [calculatedAccounts, counterparties, transactions, selectedAccountId, selectedProjectId]);
 
   if (loading) {
     return <div className="p-6 flex items-center justify-center h-64"><p className="text-muted-foreground">Loading...</p></div>;
@@ -128,11 +141,48 @@ const Analytics: React.FC = () => {
         </div>
         <div className="flex items-center gap-3">
           <FilterBar />
-          <Button variant="outline" size="sm" className="gap-1.5"><Download className="h-4 w-4" /> Export</Button>
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => {
+            if (activeTab === 'pnl') {
+              const rows = [
+                ...pnlData.revenue.map(([name, value]) => ({ section: 'Revenue', category: name, amount: value })),
+                ...pnlData.expenses.map(([name, value]) => ({ section: 'Expense', category: name, amount: value })),
+                { section: 'Net Profit', category: '', amount: netProfit },
+              ];
+              exportToCsv('pnl-report.csv', rows, [
+                { key: 'section', label: 'Section' },
+                { key: 'category', label: 'Category' },
+                { key: 'amount', label: 'Amount' },
+              ]);
+            } else if (activeTab === 'cashflow') {
+              const rows = [
+                ...cashFlowData.operatingEntries.map(([name, value]) => ({ section: 'Operating', item: name, amount: value })),
+                ...cashFlowData.transfers.map(t => ({ section: 'Transfer', item: `${t.from} → ${t.to}`, amount: t.amount })),
+                { section: 'Net Cash Flow', item: '', amount: cashFlowData.netCashFlow },
+              ];
+              exportToCsv('cashflow-report.csv', rows, [
+                { key: 'section', label: 'Section' },
+                { key: 'item', label: 'Item' },
+                { key: 'amount', label: 'Amount' },
+              ]);
+            } else if (activeTab === 'balance') {
+              const rows = [
+                ...balanceSheet.cashAccounts.map(a => ({ section: 'Cash & Equivalents', item: a.name, amount: a.balance })),
+                ...balanceSheet.receivables.map(c => ({ section: 'Accounts Receivable', item: c.name, amount: c.balance })),
+                { section: 'Total Assets', item: '', amount: balanceSheet.totalAssets },
+                ...balanceSheet.payables.map(c => ({ section: 'Current Liabilities', item: c.name, amount: Math.abs(c.balance) })),
+                { section: 'Equity', item: 'Retained Earnings', amount: balanceSheet.equity },
+              ];
+              exportToCsv('balance-sheet.csv', rows, [
+                { key: 'section', label: 'Section' },
+                { key: 'item', label: 'Item' },
+                { key: 'amount', label: 'Amount' },
+              ]);
+            }
+          }}><Download className="h-4 w-4" /> Export</Button>
         </div>
       </div>
 
-      <Tabs defaultValue="pnl">
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="bg-foreground p-1 rounded-xl gap-0.5">
           <TabsTrigger value="pnl" className="data-[state=active]:bg-background data-[state=active]:text-foreground text-background/70 rounded-lg px-5">Profit & Loss</TabsTrigger>
           <TabsTrigger value="cashflow" className="data-[state=active]:bg-background data-[state=active]:text-foreground text-background/70 rounded-lg px-5">Cash Flow</TabsTrigger>

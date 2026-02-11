@@ -7,6 +7,10 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Plus, Trash2, Lock } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
@@ -41,6 +45,7 @@ export const RolesSection: React.FC<{ onDirty: () => void }> = ({ onDirty }) => 
   const [newRoleDialog, setNewRoleDialog] = useState(false);
   const [newRoleName, setNewRoleName] = useState('');
   const [editingName, setEditingName] = useState('');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const activeRole = useMemo(() => {
     if (!activeRoleId && roles.length > 0) return roles[0];
@@ -79,7 +84,6 @@ export const RolesSection: React.FC<{ onDirty: () => void }> = ({ onDirty }) => 
 
   const deleteRole = async () => {
     if (!activeRole || isSystem) return;
-    if (!confirm('Delete this role?')) return;
     await supabase.from('roles').delete().eq('id', activeRole.id);
     setActiveRoleId(null);
     await refetchAll();
@@ -161,7 +165,7 @@ export const RolesSection: React.FC<{ onDirty: () => void }> = ({ onDirty }) => 
                 className="max-w-xs text-sm font-medium"
                 placeholder="Role name"
               />
-              <Button variant="outline" size="sm" onClick={deleteRole} className="text-destructive gap-1">
+              <Button variant="outline" size="sm" onClick={() => setShowDeleteConfirm(true)} className="text-destructive gap-1">
                 <Trash2 className="h-3.5 w-3.5" /> Delete
               </Button>
             </div>
@@ -214,6 +218,27 @@ export const RolesSection: React.FC<{ onDirty: () => void }> = ({ onDirty }) => 
           <DialogFooter><Button onClick={createRole} disabled={!newRoleName}>Create</Button></DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Role Confirmation */}
+      <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete role "{activeRole?.name}"?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. Users assigned to this role will lose their permissions.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => { deleteRole(); setShowDeleteConfirm(false); }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

@@ -17,13 +17,32 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from '@/components/ui/dialog';
 import {
-  ArrowLeft, Plus, Search, Building2, Users, Trash2, Save, Download,
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
+  ArrowLeft, Plus, Search, Building2, Users, Trash2, Save, Download, BarChart3, PieChart as PieChartIcon,
 } from 'lucide-react';
+import { exportToCsv } from '@/lib/exportCsv';
 import { format, parseISO, subMonths } from 'date-fns';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell,
 } from 'recharts';
 import { toast } from '@/hooks/use-toast';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+
+const counterpartySchema = z.object({
+  name: z.string().min(2, 'Name must be at least 2 characters'),
+  email: z.string().email('Invalid email address').or(z.literal('')).optional(),
+  phone: z.string().optional(),
+  tax_id: z.string().optional(),
+  comment: z.string().optional(),
+  is_employee: z.boolean(),
+});
+
+type CounterpartyFormValues = z.infer<typeof counterpartySchema>;
 
 const BLUE_SHADES = [
   'hsl(228, 68%, 55%)', 'hsl(220, 70%, 50%)', 'hsl(210, 65%, 60%)',
@@ -97,7 +116,7 @@ const CounterpartyList: React.FC<{
   const totalPayable = active.reduce((s, c) => { const b = getBalance(c.id); return b < 0 ? s + Math.abs(b) : s; }, 0);
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="px-4 md:px-6 py-6 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -113,7 +132,30 @@ const CounterpartyList: React.FC<{
             <div className="text-xs text-muted-foreground uppercase tracking-wide">We owe</div>
             <div className="text-lg font-bold text-rose-500">{fmtSigned(-totalPayable)}</div>
           </div>
-          <Button variant="outline" size="sm"><Download className="h-4 w-4 mr-1" /> Export</Button>
+          <Button variant="outline" size="sm" onClick={() => {
+            const rows = filtered.map(c => {
+              const b = balances[c.id] || { income: 0, expense: 0 };
+              const bal = b.income - b.expense;
+              return {
+                name: c.name,
+                type: TYPE_CONFIG[c.type]?.label || c.type,
+                income: b.income,
+                expense: b.expense,
+                balance: bal,
+                email: c.email || '',
+                phone: c.phone || '',
+              };
+            });
+            exportToCsv('counterparties.csv', rows, [
+              { key: 'name', label: 'Name' },
+              { key: 'type', label: 'Type' },
+              { key: 'income', label: 'Income' },
+              { key: 'expense', label: 'Expense' },
+              { key: 'balance', label: 'Balance' },
+              { key: 'email', label: 'Email' },
+              { key: 'phone', label: 'Phone' },
+            ]);
+          }}><Download className="h-4 w-4 mr-1" /> Export</Button>
           <Button size="sm" onClick={onAdd}><Plus className="h-4 w-4 mr-1" /> Add</Button>
         </div>
       </div>
@@ -259,7 +301,7 @@ const CounterpartyDetail: React.FC<{
   }, [cpTxns, categories]);
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="px-4 md:px-6 py-6 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -276,7 +318,7 @@ const CounterpartyDetail: React.FC<{
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card className="p-4">
           <div className="text-xs text-muted-foreground uppercase">Balance</div>
           <div className={`text-2xl font-bold ${balance > 0 ? 'text-emerald-600' : balance < 0 ? 'text-rose-500' : ''}`}>{fmt(Math.abs(balance))}</div>
@@ -400,7 +442,7 @@ const CounterpartyDetail: React.FC<{
           <div className="grid grid-cols-2 gap-6">
             <Card className="p-6">
               <div className="text-sm font-semibold text-muted-foreground mb-4 flex items-center gap-2">
-                <span>📊</span> DYNAMICS (6 MO)
+                <BarChart3 className="h-4 w-4" /> DYNAMICS (6 MO)
               </div>
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
@@ -416,7 +458,7 @@ const CounterpartyDetail: React.FC<{
             </Card>
             <Card className="p-6">
               <div className="text-sm font-semibold text-muted-foreground mb-4 flex items-center gap-2">
-                <span>🕐</span> STRUCTURE (TOP 5)
+                <PieChartIcon className="h-4 w-4" /> STRUCTURE (TOP 5)
               </div>
               <div className="h-52 flex items-center justify-center">
                 {structure.length === 0 ? (
@@ -457,16 +499,19 @@ const CreateCounterpartyDialog: React.FC<{
 }> = ({ open, onClose, onCreate }) => {
   const [step, setStep] = useState<'type' | 'details'>('type');
   const [type, setType] = useState<string>('');
-  const [form, setForm] = useState({ name: '', email: '', phone: '', tax_id: '', comment: '', is_employee: false });
 
-  const reset = () => { setStep('type'); setType(''); setForm({ name: '', email: '', phone: '', tax_id: '', comment: '', is_employee: false }); };
+  const cpForm = useForm<CounterpartyFormValues>({
+    resolver: zodResolver(counterpartySchema),
+    defaultValues: { name: '', email: '', phone: '', tax_id: '', comment: '', is_employee: false },
+  });
+
+  const reset = () => { setStep('type'); setType(''); cpForm.reset(); };
   const handleClose = () => { reset(); onClose(); };
 
   const selectType = (t: string) => { setType(t); setStep('details'); };
 
-  const submit = () => {
-    if (!form.name.trim()) { toast({ title: 'Name is required', variant: 'destructive' }); return; }
-    onCreate({ ...form, type });
+  const submit = (values: CounterpartyFormValues) => {
+    onCreate({ ...values, type });
     handleClose();
   };
 
@@ -495,40 +540,46 @@ const CreateCounterpartyDialog: React.FC<{
             ))}
           </div>
         ) : (
-          <div className="space-y-4 py-2">
+          <form onSubmit={cpForm.handleSubmit(submit)} className="space-y-4 py-2">
             <div>
               <Label className="text-xs uppercase text-muted-foreground">Name *</Label>
-              <Input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} className="mt-1" placeholder="Company or person name" />
+              <Input value={cpForm.watch('name')} onChange={e => cpForm.setValue('name', e.target.value, { shouldValidate: true })} className="mt-1" placeholder="Company or person name" />
+              {cpForm.formState.errors.name && (
+                <p className="text-sm font-medium text-destructive mt-1">{cpForm.formState.errors.name.message}</p>
+              )}
             </div>
             <div>
               <Label className="text-xs uppercase text-muted-foreground">Tax ID</Label>
-              <Input value={form.tax_id} onChange={e => setForm(p => ({ ...p, tax_id: e.target.value }))} className="mt-1" placeholder="1234567890" />
+              <Input value={cpForm.watch('tax_id') || ''} onChange={e => cpForm.setValue('tax_id', e.target.value)} className="mt-1" placeholder="1234567890" />
             </div>
             {type === 'CONTRACTOR' && (
               <div className="flex items-center gap-2">
-                <Checkbox id="new_emp" checked={form.is_employee} onCheckedChange={v => setForm(p => ({ ...p, is_employee: !!v }))} />
+                <Checkbox id="new_emp" checked={cpForm.watch('is_employee')} onCheckedChange={v => cpForm.setValue('is_employee', !!v)} />
                 <Label htmlFor="new_emp">This is an employee</Label>
               </div>
             )}
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label className="text-xs uppercase text-muted-foreground">Phone</Label>
-                <Input value={form.phone} onChange={e => setForm(p => ({ ...p, phone: e.target.value }))} className="mt-1" />
+                <Input value={cpForm.watch('phone') || ''} onChange={e => cpForm.setValue('phone', e.target.value)} className="mt-1" />
               </div>
               <div>
                 <Label className="text-xs uppercase text-muted-foreground">Email</Label>
-                <Input value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} className="mt-1" />
+                <Input value={cpForm.watch('email') || ''} onChange={e => cpForm.setValue('email', e.target.value, { shouldValidate: true })} className="mt-1" />
+                {cpForm.formState.errors.email && (
+                  <p className="text-sm font-medium text-destructive mt-1">{cpForm.formState.errors.email.message}</p>
+                )}
               </div>
             </div>
             <div>
               <Label className="text-xs uppercase text-muted-foreground">Comment</Label>
-              <Textarea value={form.comment} onChange={e => setForm(p => ({ ...p, comment: e.target.value }))} className="mt-1" rows={2} />
+              <Textarea value={cpForm.watch('comment') || ''} onChange={e => cpForm.setValue('comment', e.target.value)} className="mt-1" rows={2} />
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setStep('type')}>Back</Button>
-              <Button onClick={submit}>Create</Button>
+              <Button variant="outline" type="button" onClick={() => setStep('type')}>Back</Button>
+              <Button type="submit">Create</Button>
             </DialogFooter>
-          </div>
+          </form>
         )}
       </DialogContent>
     </Dialog>
@@ -542,6 +593,7 @@ const Counterparties: React.FC = () => {
   const navigate = useNavigate();
   const { counterparties, setCounterparties, transactions, accounts, projects, categories } = useData();
   const [showCreate, setShowCreate] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const selected = counterpartyId ? counterparties.find(c => c.id === counterpartyId) : null;
 
@@ -594,16 +646,39 @@ const Counterparties: React.FC = () => {
 
   if (selected) {
     return (
-      <CounterpartyDetail
-        cp={selected}
-        transactions={transactions}
-        onBack={handleBack}
-        onSave={handleSave}
-        onDelete={handleDelete}
-        accounts={accounts}
-        projects={projects}
-        categories={categories}
-      />
+      <>
+        <CounterpartyDetail
+          cp={selected}
+          transactions={transactions}
+          onBack={handleBack}
+          onSave={handleSave}
+          onDelete={() => setShowDeleteConfirm(true)}
+          accounts={accounts}
+          projects={projects}
+          categories={categories}
+        />
+        <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete "{selected.name}"?</AlertDialogTitle>
+              <AlertDialogDescription>
+                {transactions.some(t => t.counterparty_id === selected.id)
+                  ? 'This counterparty has transaction history and will be archived instead of deleted.'
+                  : 'This action cannot be undone. The counterparty will be permanently deleted.'}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                onClick={() => { handleDelete(); setShowDeleteConfirm(false); }}
+              >
+                {transactions.some(t => t.counterparty_id === selected.id) ? 'Archive' : 'Delete'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </>
     );
   }
 

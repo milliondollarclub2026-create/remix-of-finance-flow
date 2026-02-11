@@ -4,6 +4,10 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { GripVertical, FolderOpen, FolderClosed, Plus, Pencil, Trash2, Circle, Layers } from 'lucide-react';
@@ -31,6 +35,8 @@ export const FinanceSection: React.FC<Props> = ({ onDirty, section = 'categories
   const [blDialog, setBlDialog] = useState<{ open: boolean; type: 'line' | 'product'; editId?: string; lineId?: string }>({ open: false, type: 'line' });
   const [blName, setBlName] = useState('');
   const [blPrice, setBlPrice] = useState('0');
+
+  const [deleteTarget, setDeleteTarget] = useState<{ type: string; id: string; label: string } | null>(null);
 
   const [expanded, setExpanded] = useState<Set<string>>(() => {
     const all = new Set<string>();
@@ -230,7 +236,7 @@ export const FinanceSection: React.FC<Props> = ({ onDirty, section = 'categories
               <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setCatName(group.name); setCatType(group.type); setCatDialog({ open: true, type: 'group', editId: group.id }); }}>
                 <Pencil className="h-3.5 w-3.5" />
               </Button>
-              <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => deleteCatGroup(group.id)}>
+              <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => setDeleteTarget({ type: 'catGroup', id: group.id, label: group.name })}>
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
             </div>
@@ -258,7 +264,7 @@ export const FinanceSection: React.FC<Props> = ({ onDirty, section = 'categories
                     <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => { setCatName(item.name); setCatDialog({ open: true, type: 'item', editId: item.id, groupId: item.group_id }); }}>
                       <Pencil className="h-3 w-3" />
                     </Button>
-                    <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={() => deleteCat(item.id)}>
+                    <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={() => setDeleteTarget({ type: 'cat', id: item.id, label: item.name })}>
                       <Trash2 className="h-3 w-3" />
                     </Button>
                   </div>
@@ -331,7 +337,7 @@ export const FinanceSection: React.FC<Props> = ({ onDirty, section = 'categories
                 <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setAccName(group.name); setAccDialog({ open: true, type: 'group', editId: group.id }); }}>
                   <Pencil className="h-3.5 w-3.5" />
                 </Button>
-                <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => deleteAccGroup(group.id)}>
+                <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => setDeleteTarget({ type: 'accGroup', id: group.id, label: group.name })}>
                   <Trash2 className="h-3.5 w-3.5" />
                 </Button>
               </div>
@@ -359,7 +365,7 @@ export const FinanceSection: React.FC<Props> = ({ onDirty, section = 'categories
                       <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => { setAccName(item.name); setAccBalance(String(item.opening_balance)); setAccCurrency(item.currency); setAccDialog({ open: true, type: 'item', editId: item.id, groupId: item.group_id }); }}>
                         <Pencil className="h-3 w-3" />
                       </Button>
-                      <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={() => deleteAcc(item.id)}>
+                      <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={() => setDeleteTarget({ type: 'acc', id: item.id, label: item.name })}>
                         <Trash2 className="h-3 w-3" />
                       </Button>
                     </div>
@@ -403,7 +409,7 @@ export const FinanceSection: React.FC<Props> = ({ onDirty, section = 'categories
                     <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setBlName(bl.name); setBlDialog({ open: true, type: 'line', editId: bl.id }); }}>
                       <Pencil className="h-3.5 w-3.5" />
                     </Button>
-                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => deleteBusinessLine(bl.id)}>
+                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => setDeleteTarget({ type: 'businessLine', id: bl.id, label: bl.name })}>
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
                   </div>
@@ -421,7 +427,7 @@ export const FinanceSection: React.FC<Props> = ({ onDirty, section = 'categories
                           <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => { setBlName(prod.name); setBlPrice(String(prod.price)); setBlDialog({ open: true, type: 'product', editId: prod.id, lineId: prod.business_line_id }); }}>
                             <Pencil className="h-3 w-3" />
                           </Button>
-                          <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={() => deleteProduct(prod.id)}>
+                          <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={() => setDeleteTarget({ type: 'product', id: prod.id, label: prod.name })}>
                             <Trash2 className="h-3 w-3" />
                           </Button>
                         </div>
@@ -544,6 +550,37 @@ export const FinanceSection: React.FC<Props> = ({ onDirty, section = 'categories
           <DialogFooter><Button onClick={saveBl} disabled={!blName}>Save</Button></DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={open => { if (!open) setDeleteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {deleteTarget?.label}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. This will permanently delete "{deleteTarget?.label}" and all its contents.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={async () => {
+                if (!deleteTarget) return;
+                const { type, id } = deleteTarget;
+                if (type === 'catGroup') await deleteCatGroup(id);
+                else if (type === 'cat') await deleteCat(id);
+                else if (type === 'accGroup') await deleteAccGroup(id);
+                else if (type === 'acc') await deleteAcc(id);
+                else if (type === 'businessLine') await deleteBusinessLine(id);
+                else if (type === 'product') await deleteProduct(id);
+                setDeleteTarget(null);
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
